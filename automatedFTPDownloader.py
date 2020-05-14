@@ -6,16 +6,9 @@ AutomatedFTPDownloader
 @contributor: Hassan Ahmed
 @contact: ahmed.hassan.112.ha@gmail.com
 @owner: Patrick Mahoney
-@version: 1.0.1
+@version: 1.0.3
 
-Downloads file from IMC using a YAML file for credentials and default settings
-
-TODO: 
-DOCUMENTATION
-    - walmartinprogress
-    - walmartstatus
-    - walmarturl
-    - total_stock
+Downloads files from IMC using a YAML file for credentials and default settings
 """
 
 # Help message
@@ -25,36 +18,37 @@ Usage:
     The script is capable of running without any argument provided. All behavorial
     variables will be reset to default.
     
-    $ python3 suredone_download.py [options]
-
+    $ python3 automatedFTPDownloader.py [options]
+    
 Parameters/Options:
     -h  | --help            : View usage help and examples
-    -d  | --delimter        : Delimiter to be used as the separator in the CSV file saved by the script
-        |                       - Default is comma ','.
-    -f  | --file            : Path to the configuration file containing API keys
-        |                       - Default in %APPDATA%/local/suredone.yaml on Window
-        |                       - Default in $HOME/suredone.yaml
-    -o  | --output          : Path for the output file to be downloaded at
-        |                       - Default in %USERPROFILE%/Downloads/SureDone_Downloads_yyyy_mm_dd-hh-mm-ss.csv
-        |                       - Default in $HOME/downloads/SureDone_Downloads_yyyy_mm_dd-hh-mm-ss.csv
-    -p  | --preserve        : Do not delete older files that start with 'SureDone_' in the download directory
+    -f  | --file            : Path to the configuration file containing FTP hostnames, users, passwords, and paths
+        |                       - First default in current working directory, will search for "ftp.yaml"
+        |                       - Default in %APPDATA%/local/ftp.yaml on Windows
+        |                       - Default in $HOME/ftp.yaml on Linux
+    -o  | --output          : Path for the output files to be downloaded at (directory path)
+        |                       - Default in %USERPROFILE%/Downloads on Windows
+        |                       - Default in $HOME on Linux
+    -p  | --preserve        : (Force-disabled right now) Do not delete older files that start with 'SureDone_' in the download directory
         |                       - This funciton is limited to default download locations only.
         |                       - Defining custom output path will render this feature useless.
-    -v  | --verbose         : Show outputs in terminal as well as log file
-    -w  | --wait            : Custom timeout for requests invoked by the script (specified in seconds)
-        |                       - Default: 15 seconds
+    -s  | --site            : A specific site in the YAML file that should be targetted to connect and download files from
+    -u  | --unzip           : If provided, all the .zip and .tar files downloaded from FTP sites will be unzipped in the root folder as well
+    -v  | --verbose         : Show outputs in terminal as well as the log file
+
+
 
 Example:
-    $ python3 suredone_download.py
+    $ python3 automatedFTPDownloader.py
 
-    $ python3 suredone_download.py -f [config.yaml]
-    $ python3 suredone_download.py -file [config.yaml]
+    $ python3 automatedFTPDownloader.py -f [config.yaml]
+    $ python3 automatedFTPDownloader.py -file [config.yaml]
 
-    $ python3 suredone_download.py -f [config.yaml] -o [output.csv]
-    $ python3 suredone_download.py -file [config.yaml] --output_file [output.csv]
+    $ python3 automatedFTPDownloader.py -f [config.yaml] -o [Downloads/]
+    $ python3 automatedFTPDownloader.py -file [config.yaml] --output [Downloads/]
 
-    $ python3 suredone_download.py -f [config.yaml] -o [output.csv] -v -p
-    $ python3 suredone_download.py -file [config.yaml] --output_file [output.csv] --verbose --preserve
+    $ python3 automatedFTPDownloader.py -f [config.yaml] -o [XYZFiles/today/] -s XYZ_ftp -v -p
+    $ python3 automatedFTPDownloader.py -file [config.yaml] --output [XYZFiles/today/] --site XYZ_ftp --verbose --preserve
 """
 
 # Imports
@@ -83,7 +77,9 @@ RUN_TIME = currentMilliTime()
 def main(argv):
     localFrame = inspect.currentframe()
     # Parse arguments
-    ftpYAMLPath, outputDIRPath, preserveOldFiles, verbose, unzipFiles = parseArgs(argv)
+    ftpYAMLPath, outputDIRPath, preserveOldFiles, verbose, unzipFiles, ftpConfigs, targetFTPSite = parseArgs(argv)
+    # Force-enablinbg the preserve feature in order to disable purging
+    preserveOldFiles = True
 
     LOGGER.writeLog("FTP YAML path: {}".format(ftpYAMLPath), localFrame.f_lineno, severity='normal')
     LOGGER.writeLog("Local directory: {}".format(outputDIRPath), localFrame.f_lineno, severity='normal')
@@ -91,23 +87,29 @@ def main(argv):
     LOGGER.writeLog("Verbose: {}".format(verbose), localFrame.f_lineno, severity='normal')
     LOGGER.writeLog("Unzip files: {}".format(unzipFiles), localFrame.f_lineno, severity='normal')
 
-    # Load credentials from the config path
-    ftpConfigs = loadCredentials(ftpYAMLPath)
-
-    # TODO: This is the part where we will calcualte which ftp site to hit to. CUrrently hard coded
-    targetFTPSite = 'test_ftp'
-    if not targetFTPSite in ftpConfigs.keys():
-        LOGGER.writeLog("Credentials of the target ftp site ({}) were not present in the config. Exiting...".format(targetFTPSite), localFrame.f_lineno, severity='code-breaker', data={'code':1})
-        exit()
+    # Iterate over all the ftp sites if target ftp site is ".*_.*"
+    if targetFTPSite == '.*_.*':
+        targetFTPSite = []
+        for key in ftpConfigs.keys():
+            targetFTPSite.append(key)
+    else:
+        targetFTPSite = [targetFTPSite]
+    LOGGER.writeLog("Target sites: {}".format(targetFTPSite), localFrame.f_lineno, severity='normal')
     
-    # Connect to FTP and download all files in the specified directory
-    downloadedFiles = connectToFTP(ftpConfigs[targetFTPSite], outputDIRPath)
-
-    # Unzip downloaded files if present
-    if unzipFiles:
-        unzipZippedFiles(outputDIRPath, downloadedFiles)
+    allFilesDownloaded = []
     
-    safeExit(outputDIRPath, downloadedFiles, marker='execution-complete')
+    # Spin through the list of target sites
+    for site in targetFTPSite:
+        # Connect to FTP and download all files in the specified directory
+        downloadedFiles = connectToFTP(ftpConfigs[site], site, outputDIRPath)
+
+        # Unzip downloaded files if present
+        if unzipFiles:
+            unzipZippedFiles(outputDIRPath, downloadedFiles)
+        
+        allFilesDownloaded = allFilesDownloaded + downloadedFiles
+    
+    safeExit(outputDIRPath, allFilesDownloaded, marker='execution-complete')
 
 def safeExit(downloadPath, downloadedFiles, marker=''):
     """
@@ -185,7 +187,7 @@ def loadCredentials(ftpPath):
             del ftpConfigs[config]
     return ftpConfigs
 
-def connectToFTP(siteConfig, downloadPath):
+def connectToFTP(siteConfig, siteName, downloadPath):
     """
     Function that connects to the required FTP site, navigates to the specified path and hands over to the download function
 
@@ -203,7 +205,7 @@ def connectToFTP(siteConfig, downloadPath):
     password = str(siteConfig['password'])
     sourceDirectory = siteConfig['remote_path'] # TODO: change to camel case
 
-    LOGGER.writeLog("Connecting to {} ...".format(hostname), localFrame.f_lineno, severity='normal')
+    LOGGER.writeLog("Connecting to {} at host {}...".format(siteName, hostname), localFrame.f_lineno, severity='normal')
 
     # Attempt to connect        
     ftp = FTP(hostname)
@@ -342,9 +344,10 @@ def parseArgs(argv):
         - preserveOldFiles : bool
             A boolean variable that will tell the script to keep or remove older downloaded files in the download path
     """
+    localFrame = inspect.currentframe()
     # Defining options in for command line arguments
-    options = "hf:o:vpu"
-    long_options = ["help", "file=", 'output=', 'verbose', 'preserve', 'unzip']
+    options = "hf:o:vpus:"
+    long_options = ["help", "file=", 'output=', 'verbose', 'preserve', 'unzip', "site="]
     
     # Arguments
     ftpYAMLPath = 'ftp.yaml'
@@ -354,6 +357,8 @@ def parseArgs(argv):
     verbose = False
     preserveOldFiles = False
     unzipFiles = False
+    targetSiteSpecified = False
+    targetSite = '.*_.*'
 
     # Extracting arguments
     try:
@@ -385,6 +390,10 @@ def parseArgs(argv):
             LOGGER.verbose = verbose
         elif option in ("-u", "--unzip"):
             unzipFiles = True
+        elif option in ("-s", "--site"):
+            targetSite = value
+            targetSiteSpecified = True
+            
 
 
 
@@ -393,8 +402,21 @@ def parseArgs(argv):
         ftpYAMLPath = getDefaultConfigPath()
     if not customOutputPathFoundAndValidated:
         outputDIRPath = getDefaultDownloadPath(preserve=preserveOldFiles)
+    
+    # Load credentials from the config path
+    ftpConfigs = loadCredentials(ftpYAMLPath)
+    
+    # Validate the target site and make sure it is present in there
+    if targetSiteSpecified:
+        if not targetSite in ftpConfigs.keys():
+            LOGGER.writeLog("Credentials of the target ftp site ({}) were not present in the config.".format(targetSite), localFrame.f_lineno, severity='code-breaker', data={'code':1})
+            LOGGER.writeLog("Check the log to make sure that it wasn't removed due to incomplete infromation.", localFrame.f_lineno, severity='code-breaker', data={'code':1})
+            LOGGER.writeLog("Exiting...", localFrame.f_lineno, severity='code-breaker', data={'code':1})
+            exit()
+    else:
+        targetSite = ".*_.*"
 
-    return ftpYAMLPath, outputDIRPath, preserveOldFiles, verbose, unzipFiles
+    return ftpYAMLPath, outputDIRPath, preserveOldFiles, verbose, unzipFiles, ftpConfigs, targetSite
 
 def validateConfigPath(configPath):
     """
@@ -501,23 +523,16 @@ def getDefaultDownloadPath(preserve):
         downloadPath = os.path.expandvars(r'%USERPROFILE%')
         downloadPath = os.path.join(downloadPath, 'Downloads')
         if not preserve:
-            # TODO: Which files to remove???
             purge(downloadPath, 'SureDone_')
             LOGGER.writeLog("Purged existing files.", localFrame.f_lineno, severity='normal')
-        
         return downloadPath
 
-    # If Linux, set the download path to the $HOME/downloads folder
+    # If Linux, set the download path to the $HOME/ folder
     elif sys.platform == 'linux' or sys.platform == 'linux2': # Linux
         downloadPath = expanduser('~')
-        downloadPath = os.path.join(downloadPath, 'downloads')
-        if os.path.exists(downloadPath):
-            if not preserve:
-                purge(downloadPath, 'SureDone_')
-                LOGGER.writeLog("Purged existing files.", localFrame.f_lineno, severity='normal')
-        else:   # Create the downloads directory
-            os.mkdir(downloadPath)
-
+        if not preserve:
+            purge(downloadPath, 'SureDone_')
+            LOGGER.writeLog("Purged existing files.", localFrame.f_lineno, severity='normal')
         return downloadPath
 
 def purge(dir, pattern, inclusive=True):
@@ -719,7 +734,7 @@ class Logger(object):
 
 # Global variables
 PYTHON_VERSION = float(sys.version[:sys.version.index(' ')-2])
-LOGGER = Logger(verbose=False)
+LOGGER = Logger()
 
 # It all starts here
 if __name__ == "__main__":
