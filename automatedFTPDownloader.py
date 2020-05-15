@@ -6,7 +6,7 @@ AutomatedFTPDownloader
 @contributor: Hassan Ahmed
 @contact: ahmed.hassan.112.ha@gmail.com
 @owner: Patrick Mahoney
-@version: 1.0.3
+@version: 1.0.4
 
 Downloads files from IMC using a YAML file for credentials and default settings
 """
@@ -35,8 +35,6 @@ Parameters/Options:
     -s  | --site            : A specific site in the YAML file that should be targetted to connect and download files from
     -u  | --unzip           : If provided, all the .zip and .tar files downloaded from FTP sites will be unzipped in the root folder as well
     -v  | --verbose         : Show outputs in terminal as well as the log file
-
-
 
 Example:
     $ python3 automatedFTPDownloader.py
@@ -269,6 +267,7 @@ def downloadFiles(ftp, hostname, sourceDirectory, localDownloadPath):
                 file = open(os.path.join(localDownloadPath, filename), "wb")
                 ftp.retrbinary("RETR " + filename, file.write)
                 filesDownloaded.append(filename)
+                file.close()
             except Exception as directory_error:     # Could it be another error though?
                 LOGGER.writeLog("{} was actually a directory, skipping...".format(filename), localFrame.f_lineno, severity='normal')
 
